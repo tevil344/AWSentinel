@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awsentinel"
+version = "0.1.0"
+description = "AWS security analysis platform that crawls AWS accounts and detects security paths"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "aioboto3>=13.0.0",
+    "click>=8.1.0",
+    "SQLAlchemy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "moto>=5.0.5",
+    "black>=24.0.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+awsentinel = "awsentinel.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["awsentinel*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
