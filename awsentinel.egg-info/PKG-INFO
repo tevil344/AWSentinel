@@ -1,0 +1,23 @@
+Metadata-Version: 2.4
+Name: awsentinel
+Version: 0.1.0
+Summary: AWS security analysis platform that crawls AWS accounts and detects security paths
+License: MIT
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: aioboto3>=13.0.0
+Requires-Dist: click>=8.1.0
+Requires-Dist: SQLAlchemy>=2.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: moto>=5.0.5; extra == "dev"
+Requires-Dist: black>=24.0.0; extra == "dev"
+Requires-Dist: ruff>=0.3.0; extra == "dev"
+
+# AWSentinel
+
+AWSentinel is an open-source AWS security analysis platform that crawls AWS accounts and later performs privilege escalation analysis, lateral movement detection, attack-path graphing, and autonomous remediation.
+
+## Phase 1: Core Async IAM Crawler & Skeleton
+Provides CLI to scan AWS account credentials and store raw JSON IAM resources in an SQLite database.

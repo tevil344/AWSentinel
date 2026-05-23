@@ -1,0 +1,2 @@
+[console_scripts]
+awsentinel = awsentinel.cli.main:main
