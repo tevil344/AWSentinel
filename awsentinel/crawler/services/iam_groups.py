@@ -5,6 +5,7 @@ import logging
 
 from awsentinel.models.principal import GroupRecord
 from awsentinel.crawler.utils import run_with_retry, paginate_aws
+from awsentinel.telemetry.runtime_metrics import RuntimeMetrics
 
 logger = logging.getLogger("awsentinel.crawler.services.iam_groups")
 
@@ -141,12 +142,17 @@ async def crawl_single_group(
 
 
 async def crawl_groups(
-    client: Any, semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> List[GroupRecord]:
     """Lists all groups in the account and crawls their metadata concurrently."""
     groups_raw = []
     try:
-        async for page in paginate_aws(client, "list_groups", semaphore):
+        async for page in paginate_aws(
+            client, "list_groups", semaphore, metrics=metrics
+        ):
             groups_raw.extend(page.get("Groups", []))
     except Exception as e:
         logger.error(f"Failed to list groups for crawl: {e}")

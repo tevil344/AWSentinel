@@ -4,7 +4,9 @@ from botocore.exceptions import ClientError
 import logging
 
 from awsentinel.models.principal import UserRecord
+from awsentinel.crawler.services.iam_access_advisor import get_service_last_accessed
 from awsentinel.crawler.utils import run_with_retry, paginate_aws
+from awsentinel.telemetry.runtime_metrics import RuntimeMetrics
 
 logger = logging.getLogger("awsentinel.crawler.services.iam_users")
 
@@ -139,7 +141,11 @@ async def get_access_key_last_used(
 
 
 async def crawl_single_user(
-    client: Any, user: Dict[str, Any], semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    user: Dict[str, Any],
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> UserRecord:
     """Crawls all sub-resources for a single IAM user concurrently and constructs a UserRecord."""
     user_name = user["UserName"]
@@ -150,15 +156,24 @@ async def crawl_single_user(
     inline_names_task = list_user_policies(client, user_name, semaphore)
     attached_policies_task = list_attached_user_policies(client, user_name, semaphore)
     access_keys_task = list_access_keys(client, user_name, semaphore)
+    service_last_accessed_task = get_service_last_accessed(
+        client, user["Arn"], semaphore, metrics=metrics
+    )
 
-    user_detail, groups, inline_names, attached_policies, access_keys = (
-        await asyncio.gather(
-            user_detail_task,
-            groups_task,
-            inline_names_task,
-            attached_policies_task,
-            access_keys_task,
-        )
+    (
+        user_detail,
+        groups,
+        inline_names,
+        attached_policies,
+        access_keys,
+        service_last_accessed,
+    ) = await asyncio.gather(
+        user_detail_task,
+        groups_task,
+        inline_names_task,
+        attached_policies_task,
+        access_keys_task,
+        service_last_accessed_task,
     )
 
     # Fetch inline policy documents in parallel
@@ -193,6 +208,7 @@ async def crawl_single_user(
         "InlinePolicies": inline_policies,
         "AttachedPolicies": attached_policies,
         "AccessKeys": access_keys_expanded,
+        "ServiceLastAccessed": service_last_accessed,
     }
 
     return UserRecord(
@@ -216,12 +232,17 @@ async def crawl_single_user(
 
 
 async def crawl_users(
-    client: Any, semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> List[UserRecord]:
     """Lists all users in the account and crawls their metadata and associations concurrently."""
     users_raw = []
     try:
-        async for page in paginate_aws(client, "list_users", semaphore):
+        async for page in paginate_aws(
+            client, "list_users", semaphore, metrics=metrics
+        ):
             users_raw.extend(page.get("Users", []))
     except Exception as e:
         logger.error(f"Failed to list users for crawl: {e}")
@@ -232,6 +253,7 @@ async def crawl_users(
 
     # Crawl each user concurrently
     tasks = [
-        crawl_single_user(client, user, semaphore, account_id) for user in users_raw
+        crawl_single_user(client, user, semaphore, account_id, metrics=metrics)
+        for user in users_raw
     ]
     return list(await asyncio.gather(*tasks))

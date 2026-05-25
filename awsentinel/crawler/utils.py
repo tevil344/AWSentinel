@@ -1,13 +1,31 @@
 import asyncio
-import logging
 import random
-from typing import Any, AsyncGenerator
+import time
+from typing import Any, AsyncGenerator, Optional
 from botocore.exceptions import ClientError
 
-logger = logging.getLogger("awsentinel.crawler.utils")
+from awsentinel.logging.config import get_logger
+from awsentinel.telemetry.runtime_metrics import RuntimeMetrics
+
+logger = get_logger("awsentinel.crawler.utils")
+
+THROTTLING_ERROR_CODES = {
+    "Throttling",
+    "RequestLimitExceeded",
+    "SlowDown",
+    "PriorRequestNotComplete",
+}
 
 
-async def run_with_retry(func, *args, **kwargs) -> Any:
+async def run_with_retry(
+    func,
+    *args,
+    service: str = "iam",
+    api_call: Optional[str] = None,
+    resource_arn: Optional[str] = None,
+    metrics: Optional[RuntimeMetrics] = None,
+    **kwargs,
+) -> Any:
     """Executes an async callable with custom exponential backoff on AWS Throttling exceptions.
 
     Args:
@@ -17,25 +35,43 @@ async def run_with_retry(func, *args, **kwargs) -> Any:
     """
     max_retries = 5
     base_delay = 1.0  # seconds
+    call_name = api_call or getattr(func, "__name__", "unknown")
     for attempt in range(max_retries):
+        started = time.perf_counter()
         try:
-            return await func(*args, **kwargs)
+            result = await func(*args, **kwargs)
+            if metrics:
+                await metrics.record_api_call(time.perf_counter() - started)
+            return result
         except ClientError as e:
+            if metrics:
+                await metrics.record_api_error()
             error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code in [
-                "Throttling",
-                "RequestLimitExceeded",
-                "SlowDown",
-                "PriorRequestNotComplete",
-            ]:
+            if error_code in THROTTLING_ERROR_CODES:
+                if metrics:
+                    await metrics.record_retry(throttled=True)
                 delay = (base_delay * (2**attempt)) + random.uniform(0, 0.5)
                 logger.warning(
-                    f"AWS API Throttled (Attempt {attempt + 1}/{max_retries}). "
-                    f"Retrying in {delay:.2f}s... Error: {error_code}"
+                    "aws_api_throttled",
+                    service=service,
+                    api_call=call_name,
+                    retry_count=attempt + 1,
+                    throttle_count=attempt + 1,
+                    resource_arn=resource_arn,
+                    error_code=error_code,
+                    retry_delay_seconds=round(delay, 2),
                 )
                 await asyncio.sleep(delay)
             else:
-                # Reraise other errors (e.g. AccessDenied, NoSuchEntity) immediately
+                logger.error(
+                    "aws_api_failure",
+                    service=service,
+                    api_call=call_name,
+                    retry_count=attempt,
+                    throttle_count=0,
+                    resource_arn=resource_arn,
+                    error_code=error_code,
+                )
                 raise
     raise RuntimeError(
         "AWS API request failed after maximum retries due to throttling."
@@ -43,7 +79,12 @@ async def run_with_retry(func, *args, **kwargs) -> Any:
 
 
 async def paginate_aws(
-    client: Any, operation_name: str, semaphore: asyncio.Semaphore, **kwargs: Any
+    client: Any,
+    operation_name: str,
+    semaphore: asyncio.Semaphore,
+    service: str = "iam",
+    metrics: Optional[RuntimeMetrics] = None,
+    **kwargs: Any,
 ) -> AsyncGenerator[dict, None]:
     """Reusable async pagination helper that limits concurrency and handles throttling/errors gracefully.
 
@@ -54,34 +95,68 @@ async def paginate_aws(
         try:
             paginator = client.get_paginator(operation_name)
         except Exception as e:
-            logger.error(f"Failed to create paginator for {operation_name}: {e}")
+            if metrics:
+                await metrics.record_api_error()
+            logger.error(
+                "aws_paginator_create_failed",
+                service=service,
+                api_call=operation_name,
+                retry_count=0,
+                throttle_count=0,
+                error_code=type(e).__name__,
+            )
             return
 
         async_iterator = paginator.paginate(**kwargs).__aiter__()
         while True:
             try:
-                # Wrap the asynchronous retrieval of the next page inside retry logic
-                page = await run_with_retry(async_iterator.__anext__)
+                page = await run_with_retry(
+                    async_iterator.__anext__,
+                    service=service,
+                    api_call=operation_name,
+                    metrics=metrics,
+                )
                 yield page
             except StopAsyncIteration:
                 break
             except ClientError as e:
+                if metrics:
+                    await metrics.record_api_error()
                 error_code = e.response.get("Error", {}).get("Code", "")
                 if error_code == "AccessDenied":
+                    if metrics:
+                        await metrics.record_partial_failure()
                     logger.warning(
-                        f"Access Denied during paginated operation {operation_name} "
-                        f"for parameters {kwargs}: {e}"
+                        "aws_paginated_access_denied",
+                        service=service,
+                        api_call=operation_name,
+                        retry_count=0,
+                        throttle_count=0,
+                        error_code=error_code,
+                        parameters=kwargs,
                     )
                     break
                 elif error_code == "NoSuchEntity":
+                    if metrics:
+                        await metrics.record_partial_failure()
                     logger.warning(
-                        f"Resource not found during paginated operation {operation_name} "
-                        f"for parameters {kwargs}: {e}"
+                        "aws_paginated_resource_missing",
+                        service=service,
+                        api_call=operation_name,
+                        retry_count=0,
+                        throttle_count=0,
+                        error_code=error_code,
+                        parameters=kwargs,
                     )
                     break
                 else:
                     logger.error(
-                        f"AWS API failure in paginator: service=iam, api={operation_name}, "
-                        f"error_code={error_code}, parameters={kwargs}"
+                        "aws_paginated_api_failure",
+                        service=service,
+                        api_call=operation_name,
+                        retry_count=0,
+                        throttle_count=0,
+                        error_code=error_code,
+                        parameters=kwargs,
                     )
                     raise

@@ -4,7 +4,9 @@ from botocore.exceptions import ClientError
 import logging
 
 from awsentinel.models.principal import RoleRecord
+from awsentinel.crawler.services.iam_access_advisor import get_service_last_accessed
 from awsentinel.crawler.utils import run_with_retry, paginate_aws
+from awsentinel.telemetry.runtime_metrics import RuntimeMetrics
 
 logger = logging.getLogger("awsentinel.crawler.services.iam_roles")
 
@@ -99,6 +101,19 @@ async def list_instance_profiles(
     return profiles
 
 
+async def list_all_instance_profiles(
+    client: Any, semaphore: asyncio.Semaphore
+) -> List[Dict[str, Any]]:
+    """Retrieves all IAM instance profiles in the account."""
+    profiles = []
+    try:
+        async for page in paginate_aws(client, "list_instance_profiles", semaphore):
+            profiles.extend(page.get("InstanceProfiles", []))
+    except Exception as e:
+        logger.warning(f"Failed listing all instance profiles: {e}")
+    return profiles
+
+
 async def get_instance_profile(
     client: Any, profile_name: str, semaphore: asyncio.Semaphore
 ) -> Optional[Dict[str, Any]]:
@@ -144,7 +159,11 @@ async def list_role_tags(
 
 
 async def crawl_single_role(
-    client: Any, role: Dict[str, Any], semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    role: Dict[str, Any],
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> RoleRecord:
     """Crawls all sub-resources for a single IAM role concurrently and constructs a RoleRecord."""
     role_name = role["RoleName"]
@@ -155,15 +174,24 @@ async def crawl_single_role(
     attached_policies_task = list_attached_role_policies(client, role_name, semaphore)
     instance_profiles_task = list_instance_profiles(client, role_name, semaphore)
     tags_task = list_role_tags(client, role_name, semaphore)
+    service_last_accessed_task = get_service_last_accessed(
+        client, role["Arn"], semaphore, metrics=metrics
+    )
 
-    role_detail, inline_names, attached_policies, instance_profiles, tags = (
-        await asyncio.gather(
-            role_detail_task,
-            inline_names_task,
-            attached_policies_task,
-            instance_profiles_task,
-            tags_task,
-        )
+    (
+        role_detail,
+        inline_names,
+        attached_policies,
+        instance_profiles,
+        tags,
+        service_last_accessed,
+    ) = await asyncio.gather(
+        role_detail_task,
+        inline_names_task,
+        attached_policies_task,
+        instance_profiles_task,
+        tags_task,
+        service_last_accessed_task,
     )
 
     # Fetch inline policy documents in parallel
@@ -196,6 +224,7 @@ async def crawl_single_role(
         "AttachedPolicies": attached_policies,
         "InstanceProfiles": instance_profiles_detailed,
         "Tags": tags,
+        "ServiceLastAccessed": service_last_accessed,
     }
 
     return RoleRecord(
@@ -220,12 +249,17 @@ async def crawl_single_role(
 
 
 async def crawl_roles(
-    client: Any, semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> List[RoleRecord]:
     """Lists all roles in the account and crawls their metadata concurrently."""
     roles_raw = []
     try:
-        async for page in paginate_aws(client, "list_roles", semaphore):
+        async for page in paginate_aws(
+            client, "list_roles", semaphore, metrics=metrics
+        ):
             roles_raw.extend(page.get("Roles", []))
     except Exception as e:
         logger.error(f"Failed to list roles for crawl: {e}")
@@ -234,8 +268,14 @@ async def crawl_roles(
     if not roles_raw:
         return []
 
+    all_instance_profiles = await list_all_instance_profiles(client, semaphore)
+
     # Crawl each role concurrently
     tasks = [
-        crawl_single_role(client, role, semaphore, account_id) for role in roles_raw
+        crawl_single_role(client, role, semaphore, account_id, metrics=metrics)
+        for role in roles_raw
     ]
-    return list(await asyncio.gather(*tasks))
+    roles = list(await asyncio.gather(*tasks))
+    for role in roles:
+        role.raw_response["AllInstanceProfiles"] = all_instance_profiles
+    return roles

@@ -6,6 +6,7 @@ from typing import Optional
 
 from awsentinel.crawler.credentials import AWSClientManager
 from awsentinel.crawler.engine import CrawlEngine
+from awsentinel.logging.config import configure_logging
 
 # Default logging configuration to stderr so it does not clutter stdout summaries
 logging.basicConfig(
@@ -24,6 +25,7 @@ def main() -> None:
 async def _run_scan(profile: str, role_arn: str, db_path: str, verbose: bool) -> None:
     # Adjust logging verbosity if requested
     log_level = logging.INFO if verbose else logging.WARNING
+    configure_logging(level=log_level)
     logging.getLogger("awsentinel").setLevel(log_level)
 
     # 1. Resolve credentials

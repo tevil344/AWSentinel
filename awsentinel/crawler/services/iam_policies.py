@@ -5,6 +5,7 @@ import logging
 
 from awsentinel.models.policy import PolicyRecord
 from awsentinel.crawler.utils import run_with_retry, paginate_aws
+from awsentinel.telemetry.runtime_metrics import RuntimeMetrics
 
 logger = logging.getLogger("awsentinel.crawler.services.iam_policies")
 
@@ -149,14 +150,17 @@ async def crawl_single_policy(
 
 
 async def crawl_policies(
-    client: Any, semaphore: asyncio.Semaphore, account_id: str
+    client: Any,
+    semaphore: asyncio.Semaphore,
+    account_id: str,
+    metrics: Optional[RuntimeMetrics] = None,
 ) -> List[PolicyRecord]:
     """Lists all Customer-Managed policies in the account and crawls their metadata concurrently."""
     policies_raw = []
     try:
         # Scope='Local' filters to Customer Managed policies.
         async for page in paginate_aws(
-            client, "list_policies", semaphore, Scope="Local"
+            client, "list_policies", semaphore, metrics=metrics, Scope="Local"
         ):
             policies_raw.extend(page.get("Policies", []))
     except Exception as e:

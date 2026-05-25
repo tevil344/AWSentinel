@@ -1,4 +1,3 @@
-import pytest
 import aiobotocore.endpoint
 import inspect
 from typing import Any

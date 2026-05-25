@@ -1,10 +1,8 @@
 import asyncio
-import os
 import pytest
-import aioboto3
 import boto3
 import unittest.mock
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from botocore.exceptions import ClientError
 from moto import mock_aws
 
@@ -126,7 +124,6 @@ async def test_successful_crawl(temp_db_path: str):
 async def test_assume_role_flow():
     """Verifies that STS AssumeRole temporary credentials are resolved successfully."""
     with mock_aws():
-        sts_client = boto3.client("sts", region_name="us-east-1")
         iam_client = boto3.client("iam", region_name="us-east-1")
 
         # Create role to assume
@@ -166,7 +163,7 @@ async def test_missing_resource_handling(temp_db_path: str):
     """Verifies that NoSuchEntity exceptions do not terminate the crawling process."""
     with mock_aws():
         manager = AWSClientManager()
-        account_id = await manager.validate_credentials()
+        await manager.validate_credentials()
         session = await manager.get_session()
 
         engine = CrawlEngine(session=session, db_path=temp_db_path)
@@ -182,7 +179,7 @@ async def test_graceful_access_denied_handling(temp_db_path: str):
     """Verifies that AccessDenied exceptions do not stop the scanner."""
     with mock_aws():
         manager = AWSClientManager()
-        account_id = await manager.validate_credentials()
+        await manager.validate_credentials()
         session = await manager.get_session()
 
         async with session.client("iam") as client:
@@ -210,7 +207,7 @@ async def test_pagination_handling(temp_db_path: str):
             iam_client.create_user(UserName=f"User-{i}")
 
         manager = AWSClientManager()
-        account_id = await manager.validate_credentials()
+        await manager.validate_credentials()
         session = await manager.get_session()
 
         async with session.client("iam") as client:
