@@ -15,7 +15,9 @@ ROLE_FIELDS = {
 class DependencyAnalysisEngine:
     """Builds operational dependency profiles for IAM identities."""
 
-    def analyze(self, resources: Iterable[dict[str, Any]]) -> tuple[DependencyProfile, ...]:
+    def analyze(
+        self, resources: Iterable[dict[str, Any]]
+    ) -> tuple[DependencyProfile, ...]:
         dependencies: dict[str, list[str]] = defaultdict(list)
         production: set[str] = set()
 

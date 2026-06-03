@@ -1,6 +1,4 @@
 from datetime import datetime
-from typing import Iterable
-
 from awsentinel.db.intelligence_models import SuppressedFindingRaw
 from awsentinel.intelligence.models import SuppressionRecord
 

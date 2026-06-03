@@ -7,7 +7,12 @@ from awsentinel.intelligence.models import SuppressionRecord
 
 
 def finding_hash(finding: RiskFinding) -> str:
-    stable = f"{finding.finding_type}:{finding.principal}:{finding.target}:{finding.matched_privesc_path}"
+    stable = (
+        f"{finding.finding_type}:"
+        f"{finding.principal}:"
+        f"{finding.target}:"
+        f"{finding.matched_privesc_path}"
+    )
     return hashlib.sha256(stable.encode()).hexdigest()
 
 

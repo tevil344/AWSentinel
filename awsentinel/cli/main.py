@@ -1,5 +1,6 @@
 import click
 import asyncio
+import json
 import logging
 import sys
 from typing import Optional
@@ -7,6 +8,12 @@ from typing import Optional
 from awsentinel.crawler.credentials import AWSClientManager
 from awsentinel.crawler.engine import CrawlEngine
 from awsentinel.logging.config import configure_logging
+from awsentinel.reporting import (
+    d3_graph_payload,
+    load_report_payload,
+    markdown_report,
+    terminal_report,
+)
 
 # Default logging configuration to stderr so it does not clutter stdout summaries
 logging.basicConfig(
@@ -80,6 +87,36 @@ def scan(
 ) -> None:
     """Inventories IAM configuration and populates SQLite database tables."""
     asyncio.run(_run_scan(profile, role_arn, db_path, verbose))
+
+
+@main.command()
+@click.option(
+    "--format",
+    "report_format",
+    type=click.Choice(["terminal", "json", "md", "graph"]),
+    default="terminal",
+    show_default=True,
+    help="Report output format.",
+)
+@click.option(
+    "--input",
+    "input_path",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Serialized AWSentinel graph/report JSON payload.",
+)
+def report(report_format: str, input_path: str) -> None:
+    """Renders findings, attack chains, and graph export payloads."""
+    payload = load_report_payload(input_path)
+    if report_format == "json":
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+    elif report_format == "md":
+        click.echo(markdown_report(payload), nl=False)
+    elif report_format == "graph":
+        click.echo(json.dumps(d3_graph_payload(payload), indent=2, sort_keys=True))
+    else:
+        for color, line in terminal_report(payload):
+            click.secho(line, fg=color)
 
 
 if __name__ == "__main__":

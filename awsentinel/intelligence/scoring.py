@@ -1,6 +1,9 @@
 from awsentinel.graph.types import BlastRadius
 from awsentinel.intelligence.constants import IntelligenceSeverity
-from awsentinel.intelligence.models import OperationalFindingContext, OperationalRiskScore
+from awsentinel.intelligence.models import (
+    OperationalFindingContext,
+    OperationalRiskScore,
+)
 
 
 class OperationalScoringEngine:
@@ -18,10 +21,10 @@ class OperationalScoringEngine:
             value += min(15, context.dependency.dependency_fanout * 3)
         if context.stale:
             value -= 30
-        if context.false_positive_probability > 0.5:
-            value -= 20
         if context.false_positive_probability > 0.8:
             value -= 15
+        elif context.false_positive_probability > 0.5:
+            value -= 20
 
         bounded = max(0, min(100, value))
         confidence = max(
@@ -39,7 +42,9 @@ class OperationalScoringEngine:
             severity=_severity(bounded),
             confidence=round(confidence, 2),
             factors={
-                "runtime_active": bool(context.runtime and context.runtime.runtime_active),
+                "runtime_active": bool(
+                    context.runtime and context.runtime.runtime_active
+                ),
                 "blast_radius": context.blast_radius.value,
                 "stale": context.stale is not None,
                 "dependency_fanout": context.dependency.dependency_fanout

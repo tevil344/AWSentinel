@@ -1,8 +1,11 @@
 from dataclasses import dataclass
+from typing import Any
 
-from awsentinel.findings.models import RiskFinding
+from awsentinel.findings.models import AutoRemediationMode, RiskFinding
 from awsentinel.graph.privesc_paths import path_registry
 from awsentinel.graph.types import AttackPath, BlastRadius, Severity
+
+SAFE_AUTOFIX_TYPES = {"STALE_ACCESS", "UNUSED_PERMISSION", "INACTIVE_ACCESS_KEY"}
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,95 @@ class RiskSignals:
     kev_active_techniques: bool = False
     blast_radius: BlastRadius = BlastRadius.SMALL
     false_positive_probability: float = 0.0
+
+
+@dataclass(frozen=True)
+class RiskClassification:
+    risk_score: int
+    severity: Severity
+    blast_radius: BlastRadius
+    confidence: float
+    auto_remediation: AutoRemediationMode
+
+
+def classify_risk(finding: Any) -> RiskClassification:
+    score = 0
+    if _truthy(finding, "privesc_to_admin", "admin_reachability"):
+        score += 40
+    if _truthy(finding, "internet_exposed", "internet_exposure"):
+        score += 30
+    if getattr(finding, "environment", "") == "prod":
+        score += 20
+    if _truthy(finding, "contains_sensitive_data"):
+        score += 20
+    if _truthy(finding, "lateral_movement_risk", "lateral_movement_capability"):
+        score += 15
+    if _truthy(finding, "no_mfa_on_principal"):
+        score += 10
+    if _truthy(finding, "active_in_kev", "kev_active_techniques"):
+        score += 15
+    if _truthy(finding, "cross_account_trust"):
+        score += 10
+
+    false_positive_prob = float(getattr(finding, "false_positive_prob", 0.0))
+    false_positive_prob = float(
+        getattr(finding, "false_positive_probability", false_positive_prob)
+    )
+    if false_positive_prob > 0.5:
+        score -= 20
+    if false_positive_prob > 0.8:
+        score -= 15
+
+    score = max(0, min(100, score))
+    severity = map_score(score)
+    blast = estimate_blast_radius(finding)
+    confidence = compute_confidence(finding)
+    finding_type = str(getattr(finding, "type", getattr(finding, "finding_type", "")))
+    if severity == Severity.CRITICAL:
+        mode = AutoRemediationMode.APPROVAL_REQUIRED
+    elif finding_type in SAFE_AUTOFIX_TYPES:
+        mode = AutoRemediationMode.AUTO_SAFE
+    else:
+        mode = AutoRemediationMode.SUGGEST_ONLY
+    return RiskClassification(score, severity, blast, confidence, mode)
+
+
+def map_score(score: int) -> Severity:
+    if score >= 80:
+        return Severity.CRITICAL
+    if score >= 60:
+        return Severity.HIGH
+    if score >= 40:
+        return Severity.MEDIUM
+    return Severity.LOW
+
+
+def estimate_blast_radius(finding: Any) -> BlastRadius:
+    current = getattr(finding, "blast_radius", None)
+    if current:
+        return current if isinstance(current, BlastRadius) else BlastRadius(str(current))
+    if _truthy(finding, "account_wide", "privesc_to_admin"):
+        return BlastRadius.ACCOUNT_WIDE
+    downstream = int(getattr(finding, "downstream_services", 0))
+    affected = int(getattr(finding, "affected_resources", downstream))
+    if affected >= 100 or downstream > 10:
+        return BlastRadius.LARGE
+    if affected >= 10 or downstream > 3:
+        return BlastRadius.MEDIUM
+    return BlastRadius.SMALL
+
+
+def compute_confidence(finding: Any) -> float:
+    confidence = float(getattr(finding, "confidence", 0.75))
+    evidence_count = int(getattr(finding, "evidence_count", 0))
+    if evidence_count:
+        confidence += min(0.2, evidence_count * 0.05)
+    confidence -= float(getattr(finding, "false_positive_prob", 0.0)) * 0.25
+    return round(max(0.0, min(1.0, confidence)), 2)
+
+
+def _truthy(finding: Any, *names: str) -> bool:
+    return any(bool(getattr(finding, name, False)) for name in names)
 
 
 class RiskClassifier:
@@ -43,13 +135,7 @@ class RiskClassifier:
         return max(0, min(100, score))
 
     def severity(self, score: int) -> Severity:
-        if score >= 85:
-            return Severity.CRITICAL
-        if score >= 65:
-            return Severity.HIGH
-        if score >= 35:
-            return Severity.MEDIUM
-        return Severity.LOW
+        return map_score(score)
 
     def blast_radius(self, node_count: int, account_wide: bool = False) -> BlastRadius:
         if account_wide:
@@ -76,12 +162,18 @@ class RiskClassifier:
             false_positive_probability=0.05,
         )
         score = self.score(signals)
+        severity = self.severity(score)
+        auto_remediation = (
+            AutoRemediationMode.APPROVAL_REQUIRED
+            if severity == Severity.CRITICAL
+            else AutoRemediationMode.SUGGEST_ONLY
+        )
         return RiskFinding(
             finding_id=f"finding:{attack_path.source}->{attack_path.target}",
             finding_type="ADMIN_REACHABILITY",
             principal=attack_path.source,
             target=attack_path.target,
-            severity=self.severity(score),
+            severity=severity,
             confidence=0.95,
             blast_radius=blast_radius,
             attack_path=attack_path,
@@ -91,6 +183,8 @@ class RiskClassifier:
                 if definition
                 else "Reduce reachable privilege paths."
             ),
+            risk_score=score,
+            auto_remediation=auto_remediation,
         )
 
     def _matched_privesc_path(self, attack_path: AttackPath, graph) -> str | None:

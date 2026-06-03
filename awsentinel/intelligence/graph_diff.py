@@ -25,7 +25,11 @@ def _path_hashes(payload: dict) -> set[str]:
     for chain in payload.get("attack_chains", []):
         steps = chain.get("steps", [])
         stable = "->".join(
-            f"{step.get('source_node')}:{step.get('action_taken')}:{step.get('target_node')}"
+            (
+                f"{step.get('source_node')}:"
+                f"{step.get('action_taken')}:"
+                f"{step.get('target_node')}"
+            )
             for step in steps
         )
         if stable:

@@ -46,7 +46,8 @@ class LeastPrivilegeEngine:
                     rarely_used_actions=rarely_used,
                     overprivileged_score=score,
                     recommendation=(
-                        "Remove unused permissions or replace wildcards with observed actions."
+                        "Remove unused permissions or replace wildcards "
+                        "with observed actions."
                         if unused
                         else "No least-privilege reduction identified."
                     ),
@@ -57,13 +58,13 @@ class LeastPrivilegeEngine:
 
 def _cloudtrail_usage_by_principal(
     cloudtrail_events: Iterable[dict[str, Any]]
-) -> dict[str, set[str]]:
-    usage: dict[str, set[str]] = {}
+) -> dict[str, Counter[str]]:
+    usage: dict[str, Counter[str]] = {}
     for event in cloudtrail_events:
         principal = event.get("Username") or event.get("userIdentity", {}).get("arn")
         action = _action_from_event(event)
         if principal and action:
-            usage.setdefault(str(principal), set()).add(action)
+            usage.setdefault(str(principal), Counter()).update((action,))
     return usage
 
 
@@ -87,4 +88,8 @@ def _actions_from_service_last_accessed(events: Iterable[dict[str, Any]]) -> set
 
 def _action_used(granted_action: str, used_actions: set[str]) -> bool:
     service = granted_action.split(":", 1)[0]
-    return granted_action in used_actions or f"{service}:*" in used_actions
+    if granted_action in used_actions or f"{service}:*" in used_actions:
+        return True
+    if granted_action.endswith(":*"):
+        return any(action.startswith(f"{service}:") for action in used_actions)
+    return False
