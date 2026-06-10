@@ -28,11 +28,7 @@ class LeastPrivilegeEngine:
                     service_last_accessed.get(permission_set.principal_arn, ())
                 )
             )
-            unused = {
-                action
-                for action in granted
-                if not _action_used(action, used)
-            }
+            unused = {action for action in granted if not _action_used(action, used)}
             rarely_used = tuple(
                 sorted(action for action, count in Counter(used).items() if count == 1)
             )
@@ -57,7 +53,7 @@ class LeastPrivilegeEngine:
 
 
 def _cloudtrail_usage_by_principal(
-    cloudtrail_events: Iterable[dict[str, Any]]
+    cloudtrail_events: Iterable[dict[str, Any]],
 ) -> dict[str, Counter[str]]:
     usage: dict[str, Counter[str]] = {}
     for event in cloudtrail_events:

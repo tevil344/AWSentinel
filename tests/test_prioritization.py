@@ -56,7 +56,7 @@ def test_confidence_scoring_and_runtime_activity_weighting():
         )
     )
 
-    assert score.score == 65
+    assert score.score == 45
     assert score.confidence < 1.0
 
 

@@ -64,8 +64,8 @@ def test_remediation_safety_blocks_terraform_lockout_and_live_compute():
     assert terraform.reasons == ('SUGGEST_PR("IaC-managed")',)
     assert lockout.decision == RemediationDecision.BLOCKED
     assert lockout.reasons == ('BLOCKED("lockout risk")',)
-    assert live.decision == RemediationDecision.HUMAN_REVIEW
-    assert live.reasons == ('HUMAN_ONLY("live workload")',)
+    assert live.decision == RemediationDecision.BLOCKED
+    assert live.reasons == ('BLOCKED("live workload")',)
 
 
 def test_report_outputs_terminal_json_markdown_and_d3_graph(tmp_path):

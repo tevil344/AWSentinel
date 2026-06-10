@@ -69,8 +69,8 @@ class RemediationSafetyEngine:
         if running_compute:
             return _decision(
                 finding_id,
-                RemediationDecision.HUMAN_REVIEW,
-                'HUMAN_ONLY("live workload")',
+                RemediationDecision.BLOCKED,
+                'BLOCKED("live workload")',
                 rollback_feasible,
             )
         if principal_arn in set(active_sessions):

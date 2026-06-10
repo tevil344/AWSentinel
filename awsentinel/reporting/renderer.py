@@ -73,7 +73,9 @@ def terminal_report(payload: dict[str, Any]) -> list[tuple[str, str]]:
                     )
                 )
         elif finding.get("attack_path", {}).get("nodes"):
-            lines.append(("white", "  -> " + " -> ".join(finding["attack_path"]["nodes"])))
+            lines.append(
+                ("white", "  -> " + " -> ".join(finding["attack_path"]["nodes"]))
+            )
     return lines
 
 

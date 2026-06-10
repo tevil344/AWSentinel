@@ -85,7 +85,9 @@ def map_score(score: int) -> Severity:
 def estimate_blast_radius(finding: Any) -> BlastRadius:
     current = getattr(finding, "blast_radius", None)
     if current:
-        return current if isinstance(current, BlastRadius) else BlastRadius(str(current))
+        return (
+            current if isinstance(current, BlastRadius) else BlastRadius(str(current))
+        )
     if _truthy(finding, "account_wide", "privesc_to_admin"):
         return BlastRadius.ACCOUNT_WIDE
     downstream = int(getattr(finding, "downstream_services", 0))

@@ -19,9 +19,11 @@ class PrioritizationEngine:
             reason = (
                 "runtime-active exploit chain"
                 if context.runtime and context.runtime.runtime_active
-                else "stale or theoretical path"
-                if context.stale
-                else "graph-reachable path"
+                else (
+                    "stale or theoretical path"
+                    if context.stale
+                    else "graph-reachable path"
+                )
             )
             scores.append(
                 PriorityScore(
@@ -31,6 +33,4 @@ class PrioritizationEngine:
                     rank_reason=reason,
                 )
             )
-        return tuple(
-            sorted(scores, key=lambda item: (-item.score, item.finding_id))
-        )
+        return tuple(sorted(scores, key=lambda item: (-item.score, item.finding_id)))

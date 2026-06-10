@@ -21,10 +21,10 @@ class OperationalScoringEngine:
             value += min(15, context.dependency.dependency_fanout * 3)
         if context.stale:
             value -= 30
+        if context.false_positive_probability > 0.5:
+            value -= 20
         if context.false_positive_probability > 0.8:
             value -= 15
-        elif context.false_positive_probability > 0.5:
-            value -= 20
 
         bounded = max(0, min(100, value))
         confidence = max(
@@ -47,9 +47,9 @@ class OperationalScoringEngine:
                 ),
                 "blast_radius": context.blast_radius.value,
                 "stale": context.stale is not None,
-                "dependency_fanout": context.dependency.dependency_fanout
-                if context.dependency
-                else 0,
+                "dependency_fanout": (
+                    context.dependency.dependency_fanout if context.dependency else 0
+                ),
             },
         )
 
