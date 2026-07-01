@@ -98,7 +98,6 @@ class AuthorizationGraphBuilder:
             permission.principal_arn
             for permission in effective_permissions
             if "*" in permission.allowed_actions
-            or "iam:AttachUserPolicy" in permission.allowed_actions
         }
         for user in sorted(users, key=lambda item: item.arn):
             self._add_node(
